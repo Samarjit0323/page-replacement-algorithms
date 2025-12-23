@@ -3,6 +3,44 @@ import pandas as pd
 
 st.set_page_config(layout="wide", page_title="OS Memory Simulator")
 
+st.markdown("""
+<style>
+    .grid-container {
+        display: flex;
+        flex-direction: row;
+        align-items: flex-start;
+        gap: 10px;
+        overflow-x: auto;
+        padding: 20px 0;
+    }
+    .grid-column {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 60px;
+        align-items: center;
+    }
+    .cell {
+        width: 55px;
+        height: 55px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 2px solid #d1d5db;
+        border-radius: 8px;
+        font-weight: bold;
+        font-size: 1.2rem;
+        background-color: #ffffff;
+    }
+    .header-cell { border: none; color: #6b7280; font-size: 0.8rem; height: 20px; }
+    .input-cell { background-color: #3b82f6; color: white; border-color: #2563eb; }
+    .fault-cell { background-color: #fee2e2; border-color: #ef4444; color: #b91c1c; }
+    .hit-cell { background-color: #f3f4f6; color: #374151; }
+    .status-cell { border: none; font-size: 1.5rem; height: 40px; }
+    .label-column { font-weight: bold; color: #4b5563; text-align: right; padding-right: 10px; min-width: 80px; }
+</style>
+""", unsafe_allow_html=True)
+
 def simulate_paging(ref_string, num_frames, algo):
     pages = [p.strip() for p in ref_string.split(',') if p.strip()]
     frames = [None] * num_frames
@@ -82,33 +120,37 @@ desc=[fifo,lru,opt]
 for i, algo_name in enumerate(algos):
     with tabs[i]:
         st.info(desc[i])
-        total_faults, steps = simulate_paging(ref_input, frame_count, algo_name)
+        faults, steps = simulate_paging(ref_input, frame_count, algo_name)
         
         col1, col2 = st.columns(2)
-        col1.metric("Total Page Faults", total_faults)
-        col2.metric("Page Fault Rate", f"{round((total_faults/len(steps))*100, 1)}%")
+        col1.metric("Total Page Faults", faults)
+        col2.metric("Page Fault Rate", f"{round((faults/len(steps))*100, 1)}%")
 
-        st.subheader(f"Vertical Frame Map: {algo_name}")
+        html_output = '<div class="grid-container">'
+        html_output += '<div class="grid-column label-column">'
+        html_output += '<div class="header-cell"></div>'
+        html_output += '<div class="left-label" style="height:55px; display:flex; align-items:center; justify-content:flex-end;">Input</div>'
+        for f in range(frame_count):
+            html_output += f'<div class="left-label" style="height:55px; display:flex; align-items:center; justify-content:flex-end;">Slot {f}</div>'
+        html_output += '<div class="left-label" style="height:40px; display:flex; align-items:center; justify-content:flex-end;">Status</div>'
+        html_output += '</div>'
 
-        ui_cols = st.columns([1.2] + [1] * len(steps))
+        for step_idx, s in enumerate(steps):
+            html_output += '<div class="grid-column">'
+            html_output += f'<div class="header-cell">Step {step_idx+1}</div>'
 
-        for idx, s in enumerate(steps):
-            ui_cols[idx+1].button(s['page'], key=f"{algo_name}_ref_{idx}") 
+            html_output += f'<div class="cell input-cell">{s["page"]}</div>'
 
-        st.markdown("---")
-        
-        for f_idx in range(frame_count):
-            for step_idx, s in enumerate(steps):
+            for f_idx in range(frame_count):
                 val = s['frames'][f_idx] if s['frames'][f_idx] is not None else "-"
-                if s['is_fault'] and s['replaced_idx'] == f_idx:
-                    ui_cols[step_idx+1].error(f"**{val}**")
-                else:
-                    ui_cols[step_idx+1].code(val)
+                cls = "fault-cell" if s['is_fault'] and s['replaced_idx'] == f_idx else "hit-cell"
+                html_output += f'<div class="cell {cls}">{val}</div>'
 
-        for idx, s in enumerate(steps):
-            if s['is_fault']:
-                ui_cols[idx+1].markdown("❌")
-            else:
-                ui_cols[idx+1].markdown("✅")
+            icon = "❌" if s['is_fault'] else "✅"
+            html_output += f'<div class="status-cell">{icon}</div>'
+            html_output += '</div>'
+            
+        html_output += '</div>'
+        st.markdown(html_output, unsafe_allow_html=True)
 
 st.success("Simulation complete. Switch tabs to compare algorithms")
