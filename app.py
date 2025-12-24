@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(layout="wide", page_title="OS Memory Simulator")
+st.set_page_config(layout="wide", page_title="Page Replacement Simulator")
 
 st.markdown("""
 <style>
@@ -120,6 +120,9 @@ desc=[fifo,lru,opt]
 for i, algo_name in enumerate(algos):
     with tabs[i]:
         st.info(desc[i])
+        if [int(p.strip()) for p in ref_input.split(',') if p.strip()]==[1, 2, 3, 4, 1, 2, 5, 1, 2, 3, 4, 5 ] and algo_name == "FIFO":
+            st.error("This reference string shows Belady's Anomaly",icon=":material/info:")
+
         faults, steps = simulate_paging(ref_input, frame_count, algo_name)
         
         col1, col2 = st.columns(2)
