@@ -3,6 +3,12 @@ import pandas as pd
 
 st.set_page_config(layout="wide", page_title="Page Replacement Simulator")
 
+# --- Session State Initialization ---
+if 'belady_data' not in st.session_state:
+    st.session_state.belady_data = {}  # Stores {frame_count: faults}
+if 'last_ref_input' not in st.session_state:
+    st.session_state.last_ref_input = ""
+
 st.markdown("""
 <style>
     .grid-container {
@@ -38,6 +44,14 @@ st.markdown("""
     .hit-cell { background-color: #f3f4f6; color: #374151; }
     .status-cell { border: none; font-size: 1.5rem; height: 40px; }
     .label-column { font-weight: bold; color: #4b5563; text-align: right; padding-right: 10px; min-width: 80px; }
+    
+    .anomaly-box {
+        background-color: #f0fdf4;
+        border: 1px solid #16a34a;
+        padding: 15px;
+        border-radius: 8px;
+        margin-top: 20px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -101,14 +115,20 @@ st.markdown("Visualize how the OS manages physical memory frames using different
 with st.sidebar:
     st.header("Input Parameters")
     ref_input = st.text_input("Reference String (comma separated)")
-    frame_count = st.number_input("Number of Frames",min_value=1, max_value=20,value=3,step=1) 
+    frame_count = st.number_input("Number of Frames", min_value=1, max_value=20, value=3, step=1) 
     run = st.button("▶ Run Simulation")
-    if not run:
+
+    if not run and not st.session_state.last_ref_input:
         st.info("Enter inputs and Run")
         st.stop()
-    if not ref_input.strip():
+    
+    if run and not ref_input.strip():
         st.warning("Reference string cannot be empty.")
         st.stop()
+
+    if run and ref_input != st.session_state.last_ref_input:
+        st.session_state.belady_data = {}
+        st.session_state.last_ref_input = ref_input
 
 algos = ["FIFO", "LRU", "Optimal"]
 tabs = st.tabs(algos)
@@ -120,15 +140,21 @@ desc=[fifo,lru,opt]
 for i, algo_name in enumerate(algos):
     with tabs[i]:
         st.info(desc[i])
-        if [int(p.strip()) for p in ref_input.split(',') if p.strip()]==[1, 2, 3, 4, 1, 2, 5, 1, 2, 3, 4, 5 ] and algo_name == "FIFO":
-            st.error("This reference string shows Belady's Anomaly",icon=":material/info:")
+        current_ref = ref_input if run else st.session_state.last_ref_input
+        if not current_ref:
+            st.stop()
 
-        faults, steps = simulate_paging(ref_input, frame_count, algo_name)
-        
+        faults, steps = simulate_paging(current_ref, frame_count, algo_name)
+
+        # --- Belady's Data Collection (Only for FIFO) ---
+        if run and algo_name == "FIFO":
+            st.session_state.belady_data[frame_count] = faults
+
         col1, col2 = st.columns(2)
         col1.metric("Total Page Faults", faults)
         col2.metric("Page Fault Rate", f"{round((faults/len(steps))*100, 1)}%")
 
+        # --- Grid Visualization (Existing Code) ---
         html_output = '<div class="grid-container">'
         html_output += '<div class="grid-column label-column">'
         html_output += '<div class="header-cell"></div>'
@@ -141,19 +167,63 @@ for i, algo_name in enumerate(algos):
         for step_idx, s in enumerate(steps):
             html_output += '<div class="grid-column">'
             html_output += f'<div class="header-cell">Step {step_idx+1}</div>'
-
             html_output += f'<div class="cell input-cell">{s["page"]}</div>'
-
             for f_idx in range(frame_count):
-                val = s['frames'][f_idx] if s['frames'][f_idx] is not None else "-"
-                cls = "fault-cell" if s['is_fault'] and s['replaced_idx'] == f_idx else "hit-cell"
-                html_output += f'<div class="cell {cls}">{val}</div>'
-
+                # Handle cases where frame count changed between runs for grid render
+                if f_idx < len(s['frames']):
+                    val = s['frames'][f_idx] if s['frames'][f_idx] is not None else "-"
+                    cls = "fault-cell" if s['is_fault'] and s['replaced_idx'] == f_idx else "hit-cell"
+                    html_output += f'<div class="cell {cls}">{val}</div>'
+            
             icon = "❌" if s['is_fault'] else "✅"
             html_output += f'<div class="status-cell">{icon}</div>'
             html_output += '</div>'
             
         html_output += '</div>'
         st.markdown(html_output, unsafe_allow_html=True)
+
+        # --- Belady's Anomaly Visualization Section (FIFO Only) ---
+        if algo_name == "FIFO":
+            st.markdown("---")
+            st.subheader("📉 Belady's Anomaly Analysis")
+            st.markdown("""
+            **Instructions:** To test for Belady's Anomaly, keep the **Reference String** constant and run the simulation with **different Frame Counts** (e.g., 3, then 4). 
+            The graph below will update to show if increasing frames actually increases faults.
+            """)
+            
+            # Prepare data
+            b_data = st.session_state.belady_data
+            if b_data:
+                # create dataframe
+                df_belady = pd.DataFrame(list(b_data.items()), columns=["Frames", "Faults"])
+                df_belady = df_belady.sort_values(by="Frames")
+
+                # Layout: Table on left, Graph on right
+                b_col1, b_col2 = st.columns([1, 2])
+                
+                with b_col1:
+                    st.caption("Fault History (Current String)")
+                    st.dataframe(df_belady, hide_index=True, use_container_width=True)
+                
+                with b_col2:
+                    if len(b_data) >= 2:
+                        st.caption("Faults vs Frames Graph")
+                        st.line_chart(df_belady.set_index("Frames"))
+                        
+                        # Check for anomaly mathematically
+                        # Simple check: if faults increased while frames increased
+                        sorted_faults = df_belady["Faults"].tolist()
+                        has_anomaly = False
+                        for k in range(len(sorted_faults) - 1):
+                            if sorted_faults[k+1] > sorted_faults[k]:
+                                has_anomaly = True
+                                break
+                        
+                        if has_anomaly:
+                            st.error("⚠️ **Belady's Anomaly Detected!** Increasing the number of frames caused more page faults.")
+                        else:
+                            st.success("No anomaly detected in currently tested frames.")
+                    else:
+                        st.info("Run the simulation with at least one more unique Frame Count to see the graph.")
 
 st.success("Simulation complete. Switch tabs to compare algorithms")
